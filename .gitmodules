@@ -1,0 +1,6 @@
+[submodule "cca"]
+	path = cca
+	url = https://github.com/meganmcd13/cca
+[submodule "fa"]
+	path = fa
+	url = https://github.com/meganmcd13/fa
