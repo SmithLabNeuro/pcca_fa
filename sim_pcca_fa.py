@@ -5,6 +5,21 @@ import warnings, math
 class sim_pcca_fa:
     '''
     Class to store parameters for generating simulated data according to the pCCA-FA model.
+
+    Methods
+    -------
+    sim_data()
+        Simulate data according to pCCA-FA model.
+    get_params()
+        Get parameters of simulator.
+    set_params()
+        Set parameters of simulator.
+    rotate_by_theta()
+        Generate vector that is rotated a specified angle from the given vector.
+    orthogonalize()
+        Orthogonalize across- (optional) and within-area loading matrices using singular value decomposition. 
+    apply_rotation()
+        Apply rotation by theta degrees to the first column of the within-area loading matrix of the specified area.
     '''
 
     def __init__(self,xDim,yDim,zDim,zxDim,zyDim,rand_seed=None,flat_eigs=False,sv_goal=(25,25),theta=None):
@@ -238,7 +253,7 @@ class sim_pcca_fa:
     
     def orthogonalize(self,do_across=True):
         '''
-        Orthogonalize loading matrices using singular value decomposition. 
+        Orthogonalize across- (optional) and within-area loading matrices using singular value decomposition. 
 
                 Parameters:
                         do_across (bool): Whether to orthogonalize the across-area loading matrices (True) or not (False)
@@ -264,7 +279,6 @@ class sim_pcca_fa:
         L_total = np.concatenate((L_top,L_bottom),axis=0)
         self.params['L_total'] = L_total
 
-    
     def apply_rotation(self,theta,hem='x'):
         '''
         Apply rotation by theta degrees to the first column of the within-area loading matrix of the specified area.
