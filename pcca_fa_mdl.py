@@ -9,14 +9,82 @@ from psutil import cpu_count
 from tqdm import tqdm
 
 class pcca_fa:
+    '''
+    pCCA-FA is a dimensionality reduction framework that combines probabilistic canonical correlation analysis (pCCA) 
+    and factor analysis (FA) to model across- and within- dataset interactions.
 
+    This class implements the pCCA-FA model, stores parameters, and contains methods for fitting the model to data and computing model metrics.
+
+    Methods
+    -------
+    train()
+        Fit a pCCA-FA model to data using expectation-maximization (EM) algorithm.
+    get_loading_matrices()
+        Get across- and within-area loading matrices of the fit model.
+    get_canonical_directions()
+        Get canonical directions from the parameters of the fit model, as in canonical correlation analysis (CCA).
+    get_correlative_modes()
+        Transforms across-area loading matrices to their correlative modes.
+    get_params()
+        Get parameters of the fit model. 
+    set_params()
+        Set parameters of the model.
+    estep()
+        Compute expectation of the posterior, according to the E-step of the EM algorithm.
+    orthogonalize()
+        Orthogonalize across- and within-area loading matrices using singular value decomposition. 
+    orthogonalize_latents()
+        Orthogonalize latent variables (posterior means) using singular value decomposition.
+    crossvalidate()
+        Perform k-fold cross-validation to select hyperparameters (optimal across- and within-area dimensionality), then fit a pCCA-FA model with the selected hyperparameters.
+    
+    Model metric methods
+    -------
+    compute_load_sim()
+        Compute loading similarity in each across- and within-area loading matrix.
+    compute_dshared()
+        Compute shared dimensionality (d_shared) in each across- and within-area loading matrix.
+    compute_part_ratio()
+        Compute part ratio in each across- and within-area loading matrix.
+    compute_psv()
+        Compute percentage of shared variance (%sv) in each across- and within-area loading matrix.
+    compute_metrics()
+        Wrapper to compute loading similarity, d_shared, part ratio, %sv, and canonical correlations.
+    '''
 
     def __init__(self,min_var=0.01):
+        '''
+        Initialize pCCA-FA model class.
+
+                Parameters:
+                        min_var (float): Used to set the variance floor, to prevent numerical underflow.
+        '''
         self.params = []
         self.min_var = min_var
 
+    def train(self,X,Y,zDim,zxDim,zyDim,tol=1e-6,max_iter=int(1e6),verbose=False,rand_seed=None,warmstart=True,X_early_stop=None,Y_early_stop=None,start_params=None):
+        '''
+        Fit a pCCA-FA model to data using expectation-maximization (EM) algorithm.
 
-    def train(self,X,Y,zDim,zxDim,zyDim,tol=1e-6,max_iter=int(1e6),verbose=False,rand_seed=None,warmstart=True,X_early_stop=None,Y_early_stop=None, start_params=None):
+                Parameters:
+                        X (array): Array of size N (trials) x xDim (neurons), spike counts in area 1
+                        Y (array): Array of size N (trials) x yDim (neurons), spike counts in area 2
+                        zDim (int): Across-area dimensionality
+                        zxDim (int): Within-area dimensionality for area 1
+                        zyDim (int): Within-area dimensionality for area 2
+                        tol (float): Tolerance for convergence of the EM algorithm
+                        max_iter (int): Maximum number of iterations of the EM algorithm
+                        verbose (bool): Flag to print out updates during training
+                        rand_seed (int): Seed for random number generator, provide to ensure reproducibility
+                        warmstart (bool): Whether to initialize starting parameters of EM algorithm using pCCA and FA
+                        X_early_stop (array): Array of size N (trials) x xDim (neurons), test spike counts in area 1
+                        Y_early_stop (array): Array of size N (trials) x yDim (neurons), test spike counts in area 2
+                        start_params (dict): Dictionary containing pCCA-FA model parameters to initialize EM algorithm
+
+                Returns:
+                        LL (array): Training data log likelihood at each iteration of EM algorithm
+                        testLL (array): If using early_stop test data, contains test data log likelihood at each iteration of EM algorithm. Empty array otherwise.
+        '''
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -85,6 +153,7 @@ class pcca_fa:
                 L_y = np.random.randn(yDim,zyDim)
             Ph = np.diag(sampleCov)
         
+        # define L_total - joint loading matrix
         L_top = np.concatenate((W_x,L_x,np.zeros((xDim,zyDim))),axis=1)
         L_bottom = np.concatenate((W_y,np.zeros((yDim,zxDim)),L_y),axis=1)
         L_total = np.concatenate((L_top,L_bottom),axis=0)
@@ -93,7 +162,7 @@ class pcca_fa:
         L_mask[:xDim,(zDim+zxDim):] = np.zeros((xDim,zyDim))
         L_mask[xDim:,zDim:(zDim+zxDim)] = np.zeros((yDim,zxDim))
 
-        # em algorithm
+        # EM algorithm
         LL = []
         testLL = []
         for i in range(max_iter):
@@ -130,7 +199,7 @@ class pcca_fa:
             Ph = np.diag(sampleCov) - np.diag(cov_iSigL.dot(L_total.T))
             Ph = np.maximum(Ph,var_floor)
 
-        # get final parameters
+        # get final parameters after convergence or max_iter
         W_x, W_y = L_total[:xDim,:zDim], L_total[xDim:,:zDim]
         L_x, L_y = L_total[:xDim,zDim:(zDim+zxDim)], L_total[xDim:,(zDim+zxDim):]
         psi_x, psi_y = Ph[:xDim], Ph[xDim:]
@@ -148,11 +217,20 @@ class pcca_fa:
         return np.array(LL), np.array(testLL)
     
     def get_loading_matrices(self):
-        # subdivide L_total into W_x, W_y, L_x, L_y directly from maximum likelihood estimation
+        '''
+        Get across- and within-area loading matrices of the fit model.
+
+                Returns:
+                        W_x (array): Array of size xDim (neurons) x zDim (latents) containing the loadings for across-area latent variables onto neurons in area 1
+                        W_y (array): Array of size yDim (neurons) x zDim (latents) containing the loadings for across-area latent variables onto neurons in area 2
+                        L_x (array): Array of size xDim (neurons) x zxDim (latents) containing the loadings for within-area latent variables onto neurons in area 1
+                        L_y (array): Array of size yDim (neurons) x zyDim (latents) containing the loadings for within-area latent variables onto neurons in area 2
+        '''
 
         xDim = len(self.params['mu_x'])
         zDim, zxDim = self.params['zDim'], self.params['zxDim']
         L_total = self.params['L_total']
+
         # get final parameters
         W_x, W_y = L_total[:xDim,:zDim], L_total[xDim:,:zDim]
         L_x, L_y = L_total[:xDim,zDim:(zDim+zxDim)], L_total[xDim:,(zDim+zxDim):]
@@ -160,7 +238,14 @@ class pcca_fa:
         return W_x, W_y, L_x, L_y
     
     def get_canonical_directions(self):
-        # get canonical directions (as returned by CCA)
+        '''
+        Get canonical directions from the parameters of the fit model, as in canonical correlation analysis (CCA).
+
+                Returns:
+                        canonical_dirs_x (array): Array of size xDim (neurons) x zDim (latents) whose columns contain the canonical directions for area 1
+                        canonical_dirs_y (array): Array of size yDim (neurons) x zDim (latents) whose columns contain the canonical directions for area 2
+                        rho (array): Array of size zDim (latents) x 1 containing the corresponding canonical correlations
+        '''
 
         W_x, W_y, L_x, L_y = self.get_loading_matrices()
         psi_x, psi_y = self.params['psi_x'], self.params['psi_y']
@@ -182,6 +267,16 @@ class pcca_fa:
         return (canonical_dirs_x, canonical_dirs_y), rho
     
     def get_correlative_modes(self):
+        '''
+        Transforms across-area loading matrices to their correlative modes.
+
+        Follows equations in Bach & Jordan, 2005.
+
+                Returns:
+                        CorrModes_x (array): Array of size xDim (neurons) x zDim (latents) whose columns contain the correlative modes for area 1
+                        CorrModes_y (array): Array of size yDim (neurons) x zDim (latents) whose columns contain the correlative modes for area 2
+        '''
+
         W_x, W_y, L_x, L_y = self.get_loading_matrices()
         psi_x, psi_y = self.params['psi_x'], self.params['psi_y']
         zDim = self.params['zDim']
@@ -203,15 +298,37 @@ class pcca_fa:
 
         return CorrModes_x, CorrModes_y
 
-
     def get_params(self):
+        '''
+        Get parameters of the fit model.
+
+                Returns:
+                        params (dict): Dictionary containing each parameter of the pCCA-FA model
+        '''
         return self.params
 
     def set_params(self,params):
+        '''
+        Set parameters of the model.
+
+                Parameters:
+                        params (dict): Dictionary containing each parameter of the pCCA-FA model
+        '''
         self.params = params
 
-
     def estep(self,X,Y):
+        '''
+        Compute expectation of the posterior, according to the E-step of the EM algorithm.
+
+                Parameters:
+                        X (array): Array of size N (trials) x xDim (neurons), spike counts in area 1
+                        Y (array): Array of size N (trials) x yDim (neurons), spike counts in area 2
+
+                Returns:
+                        z (dict): Dictionary containing the mean and covariance of the posterior
+                        LL (float): Log likelihood of the provided spike counts X and Y under the fit model parameters
+        '''
+
         N,xDim = X.shape
         N,yDim = Y.shape
 
@@ -255,11 +372,21 @@ class pcca_fa:
         }
         return z, LL
 
-
     def orthogonalize(self,across_mode='paired'):
-        # orthogonalize loading matrices W and L for each area m
-        # this transforms matrices to be in a basis of covariance modes
-        # across_mode: 'paried' or 'unpaired' corresponds to whether W_x and W_y should be paired after orthonormalizing
+        '''
+        Orthogonalize across- and within-area loading matrices using singular value decomposition. 
+
+        Note: this also transforms loading matrices to be in covariant modes (as opposed to correlative modes)
+
+                Parameters:
+                        across_mode (str): Parameter to indicate whether to orthogonalize the across-area loading matrices jointly ('paired') or individually in each area ('unpaired')
+                
+                Returns:
+                        W_x_norm (array): Array of size xDim (neurons) x zDim (latents) containing orthogonal columns with the loadings for across-area latent variables onto neurons in area 1
+                        W_y_norm (array): Array of size yDim (neurons) x zDim (latents) containing orthogonal columns the loadings for across-area latent variables onto neurons in area 2
+                        L_x_norm (array): Array of size xDim (neurons) x zxDim (latents) containing orthogonal columns the loadings for within-area latent variables onto neurons in area 1
+                        L_y_norm (array): Array of size yDim (neurons) x zyDim (latents) containing orthogonal columns the loadings for within-area latent variables onto neurons in area 2
+        '''
 
         xDim = len(self.params['mu_x'])
         zDim, zxDim, zyDim = self.params['zDim'], self.params['zxDim'], self.params['zyDim']
@@ -288,6 +415,20 @@ class pcca_fa:
         return W_x_norm, W_y_norm, L_x_norm, L_y_norm
     
     def orthogonalize_latents(self,zx_mu,zy_mu,do_across=False,z_mu=None,across_mode='paired'):
+        '''
+        Orthogonalize latent variables (posterior means) using singular value decomposition.
+
+                Parameters:
+                        zx_mu (array): Array of size N (trials) x zxDim (latents) containing the within-area latent variables or posterior mean in area 1
+                        zy_mu (array): Array of size N (trials) x zyDim (latents) containing the within-area latent variables or posterior mean in area 2
+                        do_across (bool): Whether to orthogonalize the across-area latent variables (True) or not (False)
+                        z_mu (array): Array of size N (trials) x zDim (latents) containing the across-area latent variables or posterior mean. Only used if do_across is True
+                        across_mode (str): Parameter to indicate whether to orthogonalize the across-area latent variables jointly ('paired') or individually in each area ('unpaired'). Only used if do_across is True
+                
+                Returns:
+                        z_orth (dict): Dictionary containing the orthogonalized latent variables
+                        W_orth (dict): Dictionary containing the orthogonalized loading matrices
+        '''
 
         W_x, W_y, L_x, L_y = self.get_loading_matrices() # output from maximum likelihood estimation
         xDim = L_x.shape[0]
@@ -333,14 +474,45 @@ class pcca_fa:
             else:
                 raise ValueError('across-mode must be "paired" or "unpaired"')
 
-        # return z_orth, Lorth
-        z_orth = {'z':across_z_orth,'zx':zx,'zy':zy}
-        W_orth = {'Lx':Lx_orth,'Ly':Ly_orth,'Wx':W_x_orth,'Wy':W_y_orth}
+        # return z_orth, W_orth
+        z_orth = {
+            'z':across_z_orth, # across area latent variables, empty if do_across is False
+            'zx':zx, # within-area latent variables for area 1
+            'zy':zy # within-area latent variables for area 2
+            }
+        W_orth = {
+            'Wx':W_x_orth, # across-area loading matrix for area 1
+            'Wy':W_y_orth, # across-area loading matrix for area 2
+            'Lx':Lx_orth, # within-area loading matrix for area 1
+            'Ly':Ly_orth # within-area loading matrix for area 2
+            }
 
         return z_orth, W_orth
 
     def crossvalidate(self,X,Y,zDim_list=np.linspace(0,8,9),zxDim_list=np.linspace(0,8,9),zyDim_list=np.linspace(0,8,9),n_folds=10,verbose=True,max_iter=int(1e6),tol=1e-6,warmstart=True,rand_seed=None,parallelize=False,early_stop=False):
-        # X and Y should be of size n_samples x n_neurons
+        '''
+        Perform k-fold cross-validation to select hyperparameters (optimal across- and within-area dimensionality), then fit a pCCA-FA model with the selected hyperparameters.
+
+                Parameters:
+                        X (array): Array of size N (trials) x xDim (neurons), spike counts in area 1
+                        Y (array): Array of size N (trials) x yDim (neurons), spike counts in area 2
+                        zDim_list (array): 1-dimensional array containing the across-area dimensionalities to test
+                        zxDim_list (array): 1-dimensional array containing the within-area dimensionalities to test for area 1
+                        zyDim_list (array): 1-dimensional array containing the within-area dimensionalities to test for area 2
+                        n_folds (int): The number of folds (k) for cross-validation
+                        verbose (bool): Flag to print out updates during training
+                        max_iter (int): Maximum number of iterations of the EM algorithm
+                        tol (float): Tolerance for convergence of the EM algorithm
+                        warmstart (bool): Whether to initialize starting parameters of EM algorithm using pCCA and FA
+                        rand_seed (int): Seed for random number generator, provide to ensure reproducibility
+                        parallelize (bool): Whether to parallelize cross-validation folds (True) or not (False), to reduce run time
+                        early_stop (bool): Whether to use early_stop (True) or not (False) on the testing data of each cross-validation fold
+
+                Returns:
+                        LL_curves (dict): Dictionary containing the lists of tested dimensionalities and their corresponding cross-validated data log likelihood and prediction errors, 
+                                          as well as the selected dimensionalities and its corresponding cross-validated log likelihood
+        '''
+
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -368,7 +540,7 @@ class pcca_fa:
             X_train,X_test = X[train_idx], X[test_idx]
             Y_train,Y_test = Y[train_idx], Y[test_idx]
             
-            # iterate through each zDim
+            # iterate through each zDim, provide training and testing trials to the helper function
             func = partial(self._cv_helper,Xtrain=X_train,Ytrain=Y_train,Xtest=X_test,Ytest=Y_test,\
                            rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart,early_stop=early_stop)
             if parallelize:
@@ -388,7 +560,7 @@ class pcca_fa:
         LL_curves['LLs'] = sum_LLs
         LL_curves['PEs'] = sum_SEs
 
-        # find the best # of z dimensions and train CCA model
+        # find the best # of z dimensions and train final pCCA-FA model
         max_idx = np.argmax(sum_LLs)
         zDim,zxDim,zyDim = z_list[max_idx],zx_list[max_idx],zy_list[max_idx]
         LL_curves['zDim']=zDim
@@ -397,7 +569,7 @@ class pcca_fa:
         LL_curves['final_LL'] = sum_LLs[max_idx]
         self.train(X,Y,zDim,zxDim,zyDim)
 
-        # cross-validate to get canonical correlations
+        # cross-validate to get cross-validated canonical correlations
         if verbose:
             print('Crossvalidating pCCA-FA model to compute canon corrs...')
         zx,zy = np.zeros((2,N,zDim))
@@ -434,8 +606,31 @@ class pcca_fa:
 
         return LL_curves
 
-
     def _cv_helper(self,zDim,zxDim,zyDim,Xtrain,Ytrain,Xtest,Ytest,rand_seed=None,max_iter=int(1e5),tol=1e-6,warmstart=True,early_stop=False):
+        '''
+        Helper function for crossvalidate().
+
+        Runs one train-test split and computes the log-likelihood and prediction error on the testing data.
+
+                Parameters:
+                        zDim (int): Across-area dimensionality
+                        zxDim (int): Within-area dimensionality for area 1
+                        zyDim (int): Across-area dimensionality for area 2
+                        Xtrain (array): Array of size Ntrain (trials) x xDim (neurons), training spike counts in area 1
+                        Ytrain (array): Array of size Ntrain (trials) x yDim (neurons), training spike counts in area 2
+                        Xtest (array): Array of size Ntest (trials) x xDim (neurons), testing spike counts in area 1
+                        Ytest (array): Array of size Ntest (trials) x yDim (neurons), testing spike counts in area 2
+                        rand_seed (int): Seed for random number generator, provide to ensure reproducibility
+                        max_iter (int): Maximum number of iterations of the EM algorithm
+                        tol (float): Tolerance for convergence of the EM algorithm
+                        warmstart (bool): Whether to initialize starting parameters of EM algorithm using pCCA and FA
+                        early_stop (bool): Whether to use early_stop (True) or not (False) on the testing data
+
+                Returns:
+                        LL (float): Cross-validated data log likelihood of the testing data
+                        PE (float): Prediction error of the testing data using leave-one-out prediction
+        '''
+        
         tmp = pcca_fa()
         if early_stop:
             tmp.train(Xtrain,Ytrain,zDim,zxDim,zyDim,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart,X_early_stop=Xtest,Y_early_stop=Ytest)
@@ -449,8 +644,21 @@ class pcca_fa:
         
         return (LL,PE)
 
-
     def _leaveoneout_pred(self,X,Y):
+        '''
+        Helper function for crossvalidate().
+
+        Runs leave-one-out prediction on provided data.
+
+                Parameters:
+                        X (array): Array of size N (trials) x xDim (neurons), spike counts in area 1
+                        Y (array): Array of size N (trials) x yDim (neurons), spike counts in area 2
+
+                Returns:
+                        pred_x (array): Array of size N (trials) x xDim (neurons) containing the prediction errors for area 1
+                        pred_y (array): Array of size N (trials) x yDim (neurons) containing the prediction errors for area 2
+        '''
+        
         N,xDim = X.shape
         yDim = Y.shape[1]
         X_total = np.concatenate((X,Y),axis=1)
@@ -481,52 +689,65 @@ class pcca_fa:
             pred = mu[i] + proj_term.dot(inv_term.dot(mean_term.T)) # 1 x N
             pred_total[:,i] = pred.T
 
-        return pred_total[:,:xDim],pred_total[:,xDim:]
+        pred_x = pred_total[:,:xDim] # predictions for neurons in area 1
+        pred_y = pred_total[:,xDim:] # predictions for neurons in area 2
 
-
-    def _compute_ls(self,x):
-        if len(x.shape)>1:
-            raise Exception('x must be a vector')
-        x = x / slin.norm(x)
-        n_neurons = len(x)
-        return 1-n_neurons*x.var(ddof=0)
-
+        return pred_x,pred_y
 
     def compute_load_sim(self):
+        '''
+        Compute loading similarity in each across- and within-area loading matrix.
+
+                Returns:
+                        ls (dict): Dictionary containing the loading similarity for each across- and within-area loading matrix
+
+        '''
         n_x = self.params['W_x'].shape[0]
         n_y = self.params['W_y'].shape[0]
 
-        
+        # first, orthonormalize each loading matrix
         Wx,_,_ = slin.svd(self.params['W_x'],full_matrices=False)
         Wy,_,_ = slin.svd(self.params['W_y'],full_matrices=False)
         Lx,_,_ = slin.svd(self.params['L_x'],full_matrices=False)
         Ly,_,_ = slin.svd(self.params['L_y'],full_matrices=False)
 
+        # calculate loading similarity - following equation in Umakantha, Morina, Cowley, et al., 2021.
         ls_x = 1 - n_x*Wx.var(axis=0,ddof=0)
         ls_y = 1 - n_y*Wy.var(axis=0,ddof=0)
         ls_priv_x = 1 - n_x*Lx.var(axis=0,ddof=0)
         ls_priv_y = 1 - n_y*Ly.var(axis=0,ddof=0)
 
         ls = {
-            'ls_x':ls_x,'ls_y':ls_y,
-            'ls_priv_x':ls_priv_x,'ls_priv_y':ls_priv_y
+            'ls_x':ls_x, # across-area loading similarity for area 1
+            'ls_y':ls_y, # across-area loading similarity for area 2
+            'ls_priv_x':ls_priv_x, # within-area loading similarity for area 1
+            'ls_priv_y':ls_priv_y  # within-area loading similarity for area 2
         }
         return ls
 
-
     def compute_dshared(self,cutoff_thresh=0.95):
+        '''
+        Compute shared dimensionality (d_shared) in each across- and within-area loading matrix.
+
+                Parameters:
+                        cutoff_thresh (float): Cutoff percentage (0-1) of across- or within-area shared variance to explain for selecting d_shared
+
+                Returns:
+                        return_dict (dict): Dictionary containing the across- and within-area d_shared for each area
+        '''
+
         Wx,Wy,Lx,Ly = self.get_loading_matrices()
 
         # for across-area
         if self.params['zDim'] > 0:
-            # area x
+            # area 1
             shared_x = Wx.dot(Wx.T)
             s = slin.svdvals(shared_x) # eigenvalues of WWT
             var_exp = np.cumsum(s)/np.sum(s)
             dims = np.where(var_exp >= (cutoff_thresh - 1e-9))[0]
             dshared_x = dims[0]+1
 
-            # area y
+            # area 2
             shared_y = Wy.dot(Wy.T)
             s = slin.svdvals(shared_y) # eigenvalues of WWT
             var_exp = np.cumsum(s)/np.sum(s)
@@ -545,7 +766,7 @@ class pcca_fa:
             dshared_y = 0
             dshared_all = 0
 
-        # for within area x
+        # for within area 1
         if self.params['zxDim'] > 0:
             shared_x = Lx.dot(Lx.T)
             s = slin.svdvals(shared_x) # eigenvalues of LLT
@@ -555,7 +776,7 @@ class pcca_fa:
         else:
             dshared_priv_x = 0
 
-        # for within area y
+        # for within area 2
         if self.params['zyDim'] > 0:
             shared_y = Ly.dot(Ly.T)
             s = slin.svdvals(shared_y) # eigenvalues of LLT
@@ -566,18 +787,26 @@ class pcca_fa:
             dshared_priv_y = 0
 
         return_dict = {
-            'dshared_x':dshared_x,'dshared_y':dshared_y,
-            'dshared_priv_x':dshared_priv_x,'dshared_priv_y':dshared_priv_y,
-            'dshared_all':dshared_all
+            'dshared_x':dshared_x, # d_shared for across-area shared variance in area 1
+            'dshared_y':dshared_y, # d_shared for across-area shared variance in area 2
+            'dshared_priv_x':dshared_priv_x, # d_shared for within-area shared variance in area 1
+            'dshared_priv_y':dshared_priv_y, # d_shared for within-area shared variance in area 2
+            'dshared_all':dshared_all # d_shared for across-area shared variance jointly for area 1 and 2
         }
 
         return return_dict
 
-
     def compute_part_ratio(self):
+        '''
+        Compute part ratio in each across- and within-area loading matrix.
+
+                Returns:
+                        return_dict (dict): Dictionary containing the part ratio for each across- and within-area loading matrix
+        '''
+
         Wx,Wy,Lx,Ly = self.get_loading_matrices()
 
-        # for area x
+        # for area 1
         shared_x = Wx.dot(Wx.T)
         s = slin.svd(shared_x,full_matrices=False,compute_uv=False)
         pr_x = np.square(s.sum()) / np.square(s).sum()
@@ -586,7 +815,7 @@ class pcca_fa:
         s = slin.svd(shared_x,full_matrices=False,compute_uv=False)
         pr_priv_x = np.square(s.sum()) / np.square(s).sum()
 
-        # for area y
+        # for area 2
         shared_y = Wy.dot(Wy.T)
         s = slin.svd(shared_y,full_matrices=False,compute_uv=False)
         pr_y = np.square(s.sum()) / np.square(s).sum()
@@ -602,15 +831,23 @@ class pcca_fa:
         pr = np.square(s.sum()) / np.square(s).sum()
 
         return_dict = {
-            'pr':pr,
-            'pr_x':pr_x,'pr_y':pr_y,
-            'pr_priv_x':pr_priv_x,'pr_priv_y':pr_priv_y
+            'pr':pr, # overall part ratio for across-area (includes area 1 and 2)
+            'pr_x':pr_x, # part ratio for across-area loading matrix in area 1
+            'pr_y':pr_y, # part ratio for across-area loading matrix in area 2
+            'pr_priv_x':pr_priv_x, # part ratio for within-area loading matrix in area 1
+            'pr_priv_y':pr_priv_y  # part ratio for within-area loading matrix in area 2
         }
 
         return return_dict
 
-
     def compute_psv(self):
+        '''
+        Compute percentage of shared variance (%sv) in each across- and within-area loading matrix.
+
+                Returns:
+                        psv (dict): Dictionary containing the across- and within-area %sv for neurons in each area 
+        '''
+
         Wx,Wy,Lx,Ly = self.get_loading_matrices()
         priv_x,priv_y = self.params['psi_x'],self.params['psi_y']
         
@@ -621,14 +858,14 @@ class pcca_fa:
         total_x = shared_acc_x + shared_with_x + priv_x
         total_y = shared_acc_y + shared_with_y + priv_y
         
-        # for area x
+        # for area 1
         ind_psv_x = (shared_acc_x / total_x).flatten() * 100
         ind_psv_priv_x = (shared_with_x / total_x).flatten() * 100
         priv_var_x = (priv_x / total_x).flatten() * 100
         psv_x = np.mean(ind_psv_x)
         psv_priv_x = np.mean(ind_psv_priv_x)
 
-        # for area y
+        # for area 2
         ind_psv_y = (shared_acc_y / total_y).flatten() * 100
         ind_psv_priv_y = (shared_with_y / total_y).flatten() * 100
         priv_var_y = (priv_y / total_y).flatten() * 100
@@ -640,17 +877,29 @@ class pcca_fa:
         psv_priv_overall = np.mean(np.concatenate((ind_psv_priv_x,ind_psv_priv_y)))
 
         psv = {
-            'ind_priv_x':priv_var_x, 'ind_priv_y': priv_var_y,
-            'ind_psv_x':ind_psv_x,'ind_psv_y':ind_psv_y, # across areas, each neuron
-            'ind_psv_priv_x':ind_psv_priv_x,'ind_psv_priv_y':ind_psv_priv_y, # within areas, each neuron
-            'psv_x':psv_x,'psv_y':psv_y, # across areas, mean across neurons
-            'psv_priv_x':psv_priv_x,'psv_priv_y':psv_priv_y, # within areas, mean across neurons
-            'psv_all':psv_overall,'psv_priv_all':psv_priv_overall # concatenated across or within, all neurons
+            'ind_priv_x':priv_var_x, # percent of independent variance for each neuron in area 1
+            'ind_priv_y': priv_var_y, # percent of independent variance for each neuron in area 2
+            'ind_psv_x':ind_psv_x, # percent of across-area variance for each neuron in area 1
+            'ind_psv_y':ind_psv_y, # percent of across-area variance for each neuron in area 2
+            'ind_psv_priv_x':ind_psv_priv_x, # percent of within-area variance for each neuron in area 1
+            'ind_psv_priv_y':ind_psv_priv_y, # percent of within-area variance for each neuron in area 2
+            'psv_x':psv_x, # percent of across-area variance, averaged across neurons in area 1
+            'psv_y':psv_y, # percent of across-area variance, averaged across neurons in area 2
+            'psv_priv_x':psv_priv_x, # percent of within-area variance, averaged across neurons in area 1
+            'psv_priv_y':psv_priv_y, # percent of within-area variance, averaged across neurons in area 1
+            'psv_all':psv_overall, # percent of across-area variance, averaged across all neurons
+            'psv_priv_all':psv_priv_overall # percent of within-area variance, averaged across all neurons
         }
         return psv
 
-
     def compute_metrics(self,cutoff_thresh=0.95):
+        '''
+        Wrapper to compute loading similarity, d_shared, part ratio, %sv, and canonical correlations.
+
+                Returns:
+                        metrics (dict): Dictionary containing the computed metrics (loading similarity, d_shared, part ratio, %sv, and canonical correlations)
+        '''
+
         dshared = self.compute_dshared(cutoff_thresh=cutoff_thresh)
         psv = self.compute_psv()
         pr = self.compute_part_ratio()
@@ -658,174 +907,13 @@ class pcca_fa:
         _,rho = self.get_canonical_directions()
 
         metrics = {
-            'dshared':dshared,
-            'psv':psv,
-            'part_ratio':pr,
-            'load_sim':ls,
-            'rho':rho
+            'dshared':dshared, # dictionary of d_shared metric
+            'psv':psv,         # dictionary of %sv metric
+            'part_ratio':pr,   # dictionary of part ratio metric
+            'load_sim':ls,     # dictionary of loading similarity metric
+            'rho':rho          # array of canonical correlations
         }
         if 'cv_rho' in self.params:
-            metrics['cv_rho'] = self.params['cv_rho']
+            metrics['cv_rho'] = self.params['cv_rho'] # array of cross-validated canonical correlations (if crossvalidate() was called)
+
         return metrics
-
-
-    def compute_cv_psv(self,X,Y,zDim,zxDim,zyDim,rand_seed=None,n_boots=10,test_size=0.1,verbose=False,early_stop=True,return_each=False):
-        # create k-fold iterator
-        if verbose:
-            print('Crossvalidating percent shared variance...')
-        cv_folds = ms.ShuffleSplit(n_splits=n_boots,random_state=rand_seed,\
-            train_size=1-test_size,test_size=test_size)
-
-        # iterate through train/test splits
-        i = 0
-        train_psv_x,test_psv_x = np.zeros(n_boots),np.zeros(n_boots)
-        train_psv_y,test_psv_y = np.zeros(n_boots),np.zeros(n_boots)
-        train_psv,test_psv = np.zeros(n_boots),np.zeros(n_boots)
-        train_psv_priv_x,test_psv_priv_x = np.zeros(n_boots),np.zeros(n_boots)
-        train_psv_priv_y,test_psv_priv_y = np.zeros(n_boots),np.zeros(n_boots)
-        train_psv_priv,test_psv_priv = np.zeros(n_boots),np.zeros(n_boots)
-        for train_idx,test_idx in cv_folds.split(X):
-            if verbose:
-                if i % 10 == 0: print('   Bootstrap sample ',i+1,' of ',n_boots,'...')
-
-            X_train,X_test = X[train_idx], X[test_idx]
-            Y_train,Y_test = Y[train_idx], Y[test_idx]
-            
-            # train model
-            tmp = pcca_fa()
-            if early_stop:
-                tmp.train(X_train,Y_train,zDim,zxDim,zyDim,rand_seed=rand_seed,X_early_stop=X_test,Y_early_stop=Y_test)
-            else:
-                tmp.train(X_train,Y_train,zDim,zxDim,zyDim,rand_seed=rand_seed)
-
-            tmp_psv = tmp.compute_psv_heldout(X_train,Y_train)
-            train_psv_x[i] = tmp_psv['psv_x']
-            train_psv_y[i] = tmp_psv['psv_y']
-            train_psv_priv_x[i] = tmp_psv['psv_priv_x']
-            train_psv_priv_y[i] = tmp_psv['psv_priv_y']
-            train_psv[i] = tmp_psv['psv_all']
-            train_psv_priv[i] = tmp_psv['psv_priv_all']
-
-            tmp_psv = tmp.compute_psv_heldout(X_test,Y_test)
-            test_psv_x[i] = tmp_psv['psv_x']
-            test_psv_y[i] = tmp_psv['psv_y']
-            test_psv_priv_x[i] = tmp_psv['psv_priv_x']
-            test_psv_priv_y[i] = tmp_psv['psv_priv_y']
-            test_psv[i] = tmp_psv['psv_all']
-            test_psv_priv[i] = tmp_psv['psv_priv_all']
-
-            i = i+1
-
-        if return_each:
-            train_psv = {
-                'psv_x':train_psv_x,
-                'psv_y':train_psv_y,
-                'psv_priv_x':train_psv_priv_x,
-                'psv_priv_y':train_psv_priv_y,
-                'psv_all':train_psv,
-                'psv_priv_all':train_psv_priv
-            }
-            test_psv = {
-                'psv_x':test_psv_x,
-                'psv_y':test_psv_y,
-                'psv_priv_x':test_psv_priv_x,
-                'psv_priv_y':test_psv_priv_y,
-                'psv_all':test_psv,
-                'psv_priv_all':test_psv_priv
-            }
-        else:
-            train_psv = {
-                'psv_x':np.mean(train_psv_x),
-                'psv_y':np.mean(train_psv_y),
-                'psv_priv_x':np.mean(train_psv_priv_x),
-                'psv_priv_y':np.mean(train_psv_priv_y),
-                'psv_all':np.mean(train_psv),
-                'psv_priv_all':np.mean(train_psv_priv)
-            }
-            test_psv = {
-                'psv_x':np.mean(test_psv_x),
-                'psv_y':np.mean(test_psv_y),
-                'psv_priv_x':np.mean(test_psv_priv_x),
-                'psv_priv_y':np.mean(test_psv_priv_y),
-                'psv_all':np.mean(test_psv),
-                'psv_priv_all':np.mean(test_psv_priv)
-            }
-
-        if return_each:
-            return train_psv, test_psv
-        else:
-            return train_psv, test_psv
-
-
-    def compute_psv_heldout(self,X_heldout,Y_heldout):
-        Wx,Wy,Lx,Ly = self.get_loading_matrices()
-        Phx,Phy = self.params['psi_x'],self.params['psi_y']
-
-        N = X_heldout.shape[0]
-        zDim = Wx.shape[1]
-        yDim,zyDim = Ly.shape
-        xDim,zxDim = Lx.shape
-
-        covX = np.cov(X_heldout.T,bias=True)
-        covY = np.cov(Y_heldout.T,bias=True)
-
-        # empirical part (for E[z|x] part)
-        z,_ = self.estep(X_heldout,Y_heldout)
-        cov_ez = np.cov(z['z_mu_all'].T,bias=True)
-        s_zz = cov_ez[:zDim,:zDim]
-        s_zx = cov_ez[:zDim,zDim:(zDim+zxDim)]
-        s_zy = cov_ez[:zDim,(zDim+zxDim):]
-        s_xx = cov_ez[zDim:(zDim+zxDim),zDim:(zDim+zxDim)]
-        s_xy = cov_ez[zDim:(zDim+zxDim),(zDim+zxDim):]
-        s_yy = cov_ez[(zDim+zxDim):,(zDim+zxDim):]
-
-        # theoretical part (for uncertainty part)
-        L_top = np.concatenate((Wx,Lx,np.zeros((xDim,zyDim))),axis=1)
-        L_bottom = np.concatenate((Wy,np.zeros((yDim,zxDim)),Ly),axis=1)
-        L_total = np.concatenate((L_top,L_bottom),axis=0)
-        Ph = np.concatenate((Phx,Phy))
-        Sig = L_total.dot(L_total.T) + np.diag(Ph)
-        iSig = slin.inv(Sig)
-        cov_theo_z = (L_total.T).dot(iSig).dot(L_total)
-        c_zz = cov_theo_z[:zDim,:zDim]
-        c_zx = cov_theo_z[:zDim,zDim:(zDim+zxDim)]
-        c_zy = cov_theo_z[:zDim,(zDim+zxDim):]
-        c_xx = cov_theo_z[zDim:(zDim+zxDim),zDim:(zDim+zxDim)]
-        c_xy = cov_theo_z[zDim:(zDim+zxDim),(zDim+zxDim):]
-        c_yy = cov_theo_z[(zDim+zxDim):,(zDim+zxDim):]
-
-        # compute x components
-        theo_int = Wx.dot(c_zx).dot(Lx.T) + Lx.dot(c_zx.T).dot(Wx.T)
-        ez_int = Wx.dot(s_zx).dot(Lx.T) + Lx.dot(s_zx.T).dot(Wx.T)
-        shared_x = Wx.dot(Wx.T) - \
-            Wx.dot(c_zz).dot(Wx.T) + Wx.dot(s_zz).dot(Wx.T) - \
-            (0.5*theo_int) + (0.5*ez_int)
-        priv_x = Lx.dot(Lx.T) - \
-            Lx.dot(c_xx).dot(Lx.T) + Lx.dot(s_xx).dot(Lx.T) - \
-            (0.5*theo_int) + (0.5*ez_int)
-
-        # compute y components
-        theo_int = Wy.dot(c_zy).dot(Ly.T) + Ly.dot(c_zy.T).dot(Wy.T)
-        ez_int = Wy.dot(s_zy).dot(Ly.T) + Ly.dot(s_zy.T).dot(Wy.T)
-        shared_y = Wy.dot(Wy.T) - \
-            Wy.dot(c_zz).dot(Wy.T) + Wy.dot(s_zz).dot(Wy.T) - \
-            (0.5*theo_int) + (0.5*ez_int)
-        priv_y = Ly.dot(Ly.T) - \
-            Ly.dot(c_yy).dot(Ly.T) + Ly.dot(s_yy).dot(Ly.T) - \
-            (0.5*theo_int) + (0.5*ez_int)
-        
-        total_var_x = np.diag(covX)
-        total_var_y = np.diag(covY)
-        shared_x = np.diag(shared_x)
-        shared_y = np.diag(shared_y)
-        shared_priv_x = np.diag(priv_x)
-        shared_priv_y = np.diag(priv_y)
-
-        return {
-            'psv_x' : np.mean(shared_x/total_var_x)*100,
-            'psv_y' : np.mean(shared_y/total_var_y)*100,
-            'psv_priv_x' : np.mean(shared_priv_x/total_var_x)*100,
-            'psv_priv_y' : np.mean(shared_priv_y/total_var_y)*100,
-            'psv_all' : np.mean(np.concatenate((shared_x/total_var_x,shared_y/total_var_y)))*100,
-            'psv_priv_all' : np.mean(np.concatenate((shared_priv_x/total_var_x,shared_priv_y/total_var_y)))*100
-        }
