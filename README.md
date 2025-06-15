@@ -8,7 +8,13 @@ pCCA-FA terminology, use cases, and fitting procedures are described in detail i
 
 ## Installation
 
-Download and extract the latest release of pCCA-FA to the desired working directory. This repository uses submodules, please use the following line to download.
+### Quick install
+
+Download and extract the file `pcca_fa.zip` to the desired working directory.
+
+### GitHub install
+
+Download the latest release of pCCA-FA to the desired working directory. This repository uses submodules, please use the following line to download.
 ```
 git clone --recursive https://github.com/SmithLabNeuro/pcca_fa
 ```
@@ -17,6 +23,8 @@ If the repository was cloned without the `--recursive` flag, when in the root di
 git submodule update --init --recursive
 ```
 Alternatively, files for the dependencies can be manually downloaded from GitHub: [factor analysis](https://github.com/meganmcd13/fa) and [canonical correlation analysis](https://github.com/meganmcd13/cca). This step will also be needed if the package was downloaded via .zip file. Files should be placed inside the `fa` and `cca` folders, respectively.
+
+## Setup
 
 A file containing tested Python package versions is provided for convenience (`environment.yml`). pCCA-FA code should be run inside this environment, although the tutorial should work in general Python 3.8 environments. To create the environment using conda, run the following command:
 
