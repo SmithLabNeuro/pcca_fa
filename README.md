@@ -1,6 +1,7 @@
-# pCCA-FA (probabilistic canonical correlation analysis - factor analysis)
+# pCCA-FA 
+## (a combination of probabilistic canonical correlation analysis and factor analysis)
 
-pCCA-FA is a dimensionality reduction framework that combines probabilistic CCA and factor analysis to model across- and within- dataset interactions. This project contains a Python implementation of pCCA-FA. pCCA-FA is proposed for and validated on population activity from two brain areas, and is described in the following reference. 
+pCCA-FA is a dimensionality reduction framework that combines probabilistic canonical correlation analysis (pCCA) and factor analysis (FA) to model across- and within- dataset interactions. This project contains a Python implementation of pCCA-FA. pCCA-FA is proposed for and validated on population activity from two brain areas, and is described in the following reference. 
 
 - McDonnell, M.E.&ast;, Umakantha, A.&ast;, Williamson, R.C.&ast;, Smith, M.A.&dagger;, & Yu, B. M.&dagger; Interactions across hemispheres in prefrontal cortex reflect global cognitive processing. bioRxiv (2025). <https://www.biorxiv.org/content/10.1101/2025.06.12.659406v1> (&ast; and &dagger; indicate equal contribution)
 
