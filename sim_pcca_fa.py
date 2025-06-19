@@ -22,143 +22,147 @@ class sim_pcca_fa:
         Apply rotation by theta degrees to the first column of the within-area loading matrix of the specified area.
     '''
 
-    def __init__(self,xDim,yDim,zDim,zxDim,zyDim,rand_seed=None,flat_eigs=False,sv_goal=(25,25),theta=None):
+    def __init__(self,n1,n2,d,d1,d2,rand_seed=None,flat_eigs=False,sv_goal=(25,25),theta=None):
         '''
         Initialize simulator by generating loading matrices and other necessary parameters.
 
                 Parameters:
-                    xDim (int): Number of neurons in area X
-                    yDim (int): Number of neurons in area Y
-                    zDim (int): Number of across-area latent variables (shared between area X and Y)
-                    zxDim (int): Number of within-area latent variables (only in area X)
-                    zyDim (int): Number of within-area latent variables (only in area Y)
+                    n1 (int): Number of neurons in area 1
+                    n2 (int): Number of neurons in area 2
+                    d (int): Number of across-area latent variables (shared between area 1 and 2)
+                    d1 (int): Number of within-area latent variables (only in area 1)
+                    d2 (int): Number of within-area latent variables (only in area 2)
                     rand_seed (int): Seed for random number generator, provide to ensure reproducibility
-                    flat_eigs (bool): Whether to use flat eigenspectra (True) or exponential eigenspectra (False) for across- and within-area loading matrices
+                    flat_eigs (bool): Whether to use flat distribution of singular values (True) or exponential distribution (False) for across- and within-area loading matrices
                     sv_goal (tuple): Percentages of total variance to attribute to (across,within)-area components
                     theta (float): If not None, angle (degrees) to enforce between the top across- and within-area co-fluctuation patterns
 
         '''
-        self.xDim = xDim
-        self.yDim = yDim
-        self.zDim = zDim
-        self.zxDim = zxDim
-        self.zyDim = zyDim
+        self.n1 = n1
+        self.n2 = n2
+        self.d = d
+        self.d1 = d1
+        self.d2 = d2
 
         # set random seed
         rng = np.random.default_rng(seed=rand_seed)
         
         # generate model parameters
-        mu_x = rng.standard_normal(size=(xDim))
-        mu_y = rng.standard_normal(size=(yDim))
+        mu_x1 = rng.standard_normal(size=(n1))
+        mu_x2 = rng.standard_normal(size=(n2))
 
         across_scale = sv_goal[0]
-        within_scale_x = sv_goal[1]
-        within_scale_y = sv_goal[1]
+        within_scale_x1 = sv_goal[1]
+        within_scale_x2 = sv_goal[1]
         if across_scale + sv_goal[1] > 100 or np.any(sv_goal)<0:
             raise ValueError("sv_goal must be 0-100%")
-        if zDim == 0 and across_scale > 0:
-            warnings.warn("zDim is 0, setting across-area sv_goal to 0")
+        if d == 0 and across_scale > 0:
+            warnings.warn("d is 0, setting across-area sv_goal to 0")
             across_scale = 0
-        if zxDim == 0 and within_scale_x > 0:
-            warnings.warn("zxDim is 0, setting within-area sv_goal to 0")
-            within_scale_x = 0
-        if zyDim == 0 and within_scale_y > 0:
-            warnings.warn("zyDim is 0, setting within-area sv_goal to 0")
-            within_scale_y = 0
+        if d1 == 0 and within_scale_x1 > 0:
+            warnings.warn("d1 is 0, setting within-area sv_goal to 0")
+            within_scale_x1 = 0
+        if d2 == 0 and within_scale_x2 > 0:
+            warnings.warn("d2 is 0, setting within-area sv_goal to 0")
+            within_scale_x2 = 0
 
         if flat_eigs:
             # flat distribution
-            eig_z = np.ones(zDim)
-            eig_zx = np.ones(zxDim)
-            eig_zy = np.ones(zyDim)
+            eig_z = np.ones(d)
+            eig_z1 = np.ones(d1)
+            eig_z2 = np.ones(d2)
         else:
             # exponential distribution
-            eig_z = np.exp(-np.arange(zDim)/2)
-            eig_zx = np.exp(-np.arange(zxDim)/2)
-            eig_zy = np.exp(-np.arange(zyDim)/2)
+            eig_z = np.exp(-np.arange(d)/2)
+            eig_z1 = np.exp(-np.arange(d1)/2)
+            eig_z2 = np.exp(-np.arange(d2)/2)
             
         eig_z = np.diag(np.sqrt(eig_z))
-        eig_zx = np.diag(np.sqrt(eig_zx))
-        eig_zy = np.diag(np.sqrt(eig_zy))
+        eig_z1 = np.diag(np.sqrt(eig_z1))
+        eig_z2 = np.diag(np.sqrt(eig_z2))
 
         # genrate loading matrices, then orthonormalize
-        W_x = rng.standard_normal(size=(xDim,zDim))
-        W_y = rng.standard_normal(size=(yDim,zDim))
-        L_x = rng.standard_normal(size=(xDim,zxDim))
-        L_y = rng.standard_normal(size=(yDim,zyDim))
+        W_1 = rng.standard_normal(size=(n1,d))
+        W_2 = rng.standard_normal(size=(n2,d))
+        L_1 = rng.standard_normal(size=(n1,d1))
+        L_2 = rng.standard_normal(size=(n2,d2))
 
         # orthogonalize for scaling purposes
-        if zDim > 0:
-            uwx,_,_ = slin.svd(W_x)
-            W_x = uwx[:,:zDim] @ eig_z
-            uwy,_,_ = slin.svd(W_y)
-            W_y = uwy[:,:zDim] @ eig_z
-        if zxDim > 0:
-            ulx,_,_ = slin.svd(L_x)
-            L_x = ulx[:,:zxDim] @ eig_zx
-        if zyDim > 0:
-            uly,_,_ = slin.svd(L_y)
-            L_y = uly[:,:zyDim] @ eig_zy
+        if d > 0:
+            u,_,_ = slin.svd(W_1,full_matrices=False)
+            W_1 = u @ eig_z
+            u,_,_ = slin.svd(W_2,full_matrices=False)
+            W_2 = u @ eig_z
+        if d1 > 0:
+            u,_,_ = slin.svd(L_1,full_matrices=False)
+            L_1 = u @ eig_z1
+        if d2 > 0:
+            u,_,_ = slin.svd(L_2,full_matrices=False)
+            L_2 = u @ eig_z2
 
         # if desired to rotate eigenvector of loading matrix, do that now
         if theta is not None:
-            # first rotate area X
-            col1 = self.rotate_by_theta(uwx[:,0], theta, xDim) # generate vector theta degrees from the first col of W
-            rest_cols = np.random.randn(xDim, zxDim-1) # generate remaining columns of L_x
-            tmp = np.column_stack((col1, rest_cols))
-            ulx,_ = slin.qr(tmp)
-            L_x = ulx[:,:zxDim] @ eig_zx
-            # now rotate area Y
-            col1 = self.rotate_by_theta(uwy[:,0], theta, yDim) # generate vector theta degrees from the first col of W
-            rest_cols = np.random.randn(yDim, zyDim-1) # generate remaining columns of L_y
-            tmp = np.column_stack((col1, rest_cols))
-            uly,_ = slin.qr(tmp)
-            L_y = uly[:,:zyDim] @ eig_zy
+            # first rotate area 1
+            unit_vector = W_1[:,0] / slin.norm(W_1[:,0])
+            rotated_vector = self.rotate_by_theta(unit_vector, theta, n1) # generate vector theta degrees from the first col of W
+            rest_cols = np.random.randn(n1, d1-1) # generate remaining columns of L_1
+            tmp = np.column_stack((rotated_vector, rest_cols))
+            u,_ = slin.qr(tmp)
+            L_1 = u[:,:d1] @ eig_z1
+            # now rotate area 2
+            unit_vector = W_2[:,0] / slin.norm(W_2[:,0])
+            rotated_vector = self.rotate_by_theta(unit_vector, theta, n2) # generate vector theta degrees from the first col of W
+            rest_cols = np.random.randn(n2, d2-1) # generate remaining columns of L_2
+            tmp = np.column_stack((rotated_vector, rest_cols))
+            u,_ = slin.qr(tmp)
+            L_2 = u[:,:d2] @ eig_z2
 
         # scale within-area loading matrices to achieve sv_goal
-        shared_across_x = np.diag(W_x @ W_x.T)
-        shared_within_x = np.diag(L_x @ L_x.T)
-        if zDim > 0 and zxDim > 0:
-            curr_scale = shared_across_x.mean() / shared_within_x.mean()
-            desired_scale = across_scale / within_scale_x
+        shared_across_x1 = np.diag(W_1 @ W_1.T)
+        shared_within_x1 = np.diag(L_1 @ L_1.T)
+        if d > 0 and d1 > 0:
+            curr_scale = shared_across_x1.mean() / shared_within_x1.mean()
+            desired_scale = across_scale / within_scale_x1
             multiplier = np.sqrt(curr_scale / desired_scale)
-            L_x = ulx[:,:zxDim] @ (eig_zx * multiplier)
-            shared_within_x = np.diag(L_x @ L_x.T)
+            u,_ = slin.qr(L_1) # get orthonormal basis for L_1 to scale (keep first column the same in case of rotation)
+            L_1 = u[:,:d1] @ (eig_z1 * multiplier)
+            shared_within_x1 = np.diag(L_1 @ L_1.T)
 
-        shared_across_y = np.diag(W_y @ W_y.T)
-        shared_within_y = np.diag(L_y @ L_y.T)
-        if zDim > 0 and zyDim > 0:
-            curr_scale = shared_across_y.mean() / shared_within_y.mean()
-            desired_scale = across_scale / within_scale_y
+        shared_across_x2 = np.diag(W_2 @ W_2.T)
+        shared_within_x2 = np.diag(L_2 @ L_2.T)
+        if d > 0 and d2 > 0:
+            curr_scale = shared_across_x2.mean() / shared_within_x2.mean()
+            desired_scale = across_scale / within_scale_x2
             multiplier = np.sqrt(curr_scale / desired_scale)
-            L_y = uly[:,:zyDim] @ (eig_zy * multiplier)
-            shared_within_y = np.diag(L_y @ L_y.T)
+            u,_ = slin.qr(L_2) # get orthonormal basis for L_2 to scale (keep first column the same in case of rotation)
+            L_2 = u[:,:d2] @ (eig_z2 * multiplier)
+            shared_within_x2 = np.diag(L_2 @ L_2.T)
 
         # compute independent variance values to maintain total level of shared variance
-        if zDim ==0 and zxDim == 0:
-            psi_x = np.ones(xDim)
+        if d ==0 and d1 == 0:
+            psi_1 = np.ones(n1)
         else:
-            snr = (across_scale+within_scale_x) / (100-across_scale-within_scale_x)
-            psi_x = (shared_across_x + shared_within_x) / snr
+            snr = (across_scale+within_scale_x1) / (100-across_scale-within_scale_x1)
+            psi_1 = (shared_across_x1 + shared_within_x1) / snr
         
-        if zDim ==0 and zyDim == 0:
-            psi_y = np.ones(yDim)
+        if d ==0 and d2 == 0:
+            psi_2 = np.ones(n2)
         else:
-            snr = (across_scale+within_scale_y) / (100-across_scale-within_scale_y)
-            psi_y = (shared_across_y + shared_within_y) / snr
+            snr = (across_scale+within_scale_x2) / (100-across_scale-within_scale_x2)
+            psi_2 = (shared_across_x2 + shared_within_x2) / snr
 
-        L_top = np.concatenate((W_x,L_x,np.zeros((xDim,zyDim))),axis=1)
-        L_bottom = np.concatenate((W_y,np.zeros((yDim,zxDim)),L_y),axis=1)
+        L_top = np.concatenate((W_1,L_1,np.zeros((n1,d2))),axis=1)
+        L_bottom = np.concatenate((W_2,np.zeros((n2,d1)),L_2),axis=1)
         L_total = np.concatenate((L_top,L_bottom),axis=0)
 
         # store model parameters in dict
         params = {
-            'mu_x':mu_x,'mu_y':mu_y,
+            'mu_x1':mu_x1,'mu_x2':mu_x2,
             'L_total': L_total,
-            'W_x':W_x,'W_y':W_y,
-            'L_x':L_x,'L_y':L_y,
-            'psi_x':psi_x,'psi_y':psi_y,
-            'zDim':zDim,'zxDim':zxDim,'zyDim':zyDim,
+            'W_1':W_1,'W_2':W_2,
+            'L_1':L_1,'L_2':L_2,
+            'psi_1':psi_1,'psi_2':psi_2,
+            'd':d,'d1':d1,'d2':d2,
         }
         self.params = params
 
@@ -172,31 +176,31 @@ class sim_pcca_fa:
                         rand_seed (int): Seed for random number generator, provide to ensure reproducibility
 
                 Returns:
-                        X (array): Array of size N x xDim, simulated activity for area X
-                        Y (array): Array of size N x yDim, simulated activity for area Y
+                        X_1 (array): Array of size N x n1, simulated activity for area 1
+                        X_2 (array): Array of size N x n2, simulated activity for area 2
         '''
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
 
-        mu_x = self.params['mu_x'].reshape(self.xDim,1)
-        mu_y = self.params['mu_y'].reshape(self.yDim,1)
-        W_x,W_y = self.params['W_x'], self.params['W_y']
-        L_x,L_y = self.params['L_x'], self.params['L_y']
-        psi_x,psi_y = self.params['psi_x'], self.params['psi_y']
+        mu_x1 = self.params['mu_x1'].reshape(self.n1,1)
+        mu_x2 = self.params['mu_x2'].reshape(self.n2,1)
+        W_1,W_2 = self.params['W_1'], self.params['W_2']
+        L_1,L_2 = self.params['L_1'], self.params['L_2']
+        psi_1,psi_2 = self.params['psi_1'], self.params['psi_2']
 
         # draw from each latent variable
-        z = np.random.randn(self.zDim,N)
-        zx = np.random.randn(self.zxDim,N)
-        zy = np.random.randn(self.zyDim,N)
+        z = np.random.randn(self.d,N)
+        z1 = np.random.randn(self.d1,N)
+        z2 = np.random.randn(self.d2,N)
 
         # generate data
-        ns_x = np.diag(np.sqrt(psi_x)).dot(np.random.randn(self.xDim,N))
-        ns_y = np.diag(np.sqrt(psi_y)).dot(np.random.randn(self.yDim,N))
-        X = (W_x.dot(z) + L_x.dot(zx) + ns_x) + mu_x
-        Y = (W_y.dot(z) + L_y.dot(zy) + ns_y) + mu_y
+        ns_x1 = np.diag(np.sqrt(psi_1)).dot(np.random.randn(self.n1,N))
+        ns_x2 = np.diag(np.sqrt(psi_2)).dot(np.random.randn(self.n2,N))
+        X_1 = (W_1.dot(z) + L_1.dot(z1) + ns_x1) + mu_x1
+        X_2 = (W_2.dot(z) + L_2.dot(z2) + ns_x2) + mu_x2
 
-        return X.T, Y.T
+        return X_1.T, X_2.T
     
     def get_params(self):
         '''
@@ -215,27 +219,27 @@ class sim_pcca_fa:
                         params (dict): Dictionary containing each parameter of the simulator
         '''
         # determine dimensionalities
-        self.xDim = params['W_x'].shape[0]
-        self.yDim = params['W_y'].shape[0]
-        self.zDim = params['zDim']
-        self.zxDim = params['zxDim']
-        self.zyDim = params['zyDim']
+        self.n1 = params['W_1'].shape[0]
+        self.n2 = params['W_2'].shape[0]
+        self.d = params['d']
+        self.d1 = params['d1']
+        self.d2 = params['d2']
         self.params = params
 
-    def rotate_by_theta(self,vec,theta,xDim):
+    def rotate_by_theta(self,vec,theta,n):
         '''
         Generate vector that is rotated a specified angle from the given vector.
 
                 Parameters:
                         vec (1D vector): Basis vector about which to perform rotation
                         theta (float): Angle in degrees by which to rotate the given vector
-                        xDim (int): Number of neurons in the area in which rotation is being applied (can pertain to either area X or Y)
+                        n (int): Number of neurons in the area in which rotation is being applied (can pertain to either area 1 or 2)
                 
                 Returns:
                         rotated_vec (1D vector): The rotated vector
         '''
         # define low-d basis and project vec into plane
-        A = np.column_stack((vec, np.random.randn(xDim,1)))
+        A = np.column_stack((vec, np.random.randn(n,1)))
         q,_ = np.linalg.qr(A)
         v1 = np.transpose(q) @ (vec) # 2 x 1
 
@@ -247,7 +251,7 @@ class sim_pcca_fa:
         
         # rotate vec1 to get desired vec2, then project back to high-d
         vec2_2d = R @ v1 # 2 x 1
-        rotated_vec = q @ vec2_2d # xDim x 1
+        rotated_vec = q @ vec2_2d # n x 1
 
         return rotated_vec
     
@@ -261,31 +265,31 @@ class sim_pcca_fa:
         '''
         # orthogonalize loading matrices
         if do_across:
-            uwx,svwx,_ = slin.svd(self.params['W_x'])
-            W_x = uwx[:,:self.zDim] @ np.diag((svwx[:self.zDim]))
-            uwy,svwy,_ = slin.svd(self.params['W_y'])
-            W_y = uwy[:,:self.zDim] @ np.diag((svwy[:self.zDim]))
-            self.params['W_x'] = W_x
-            self.params['W_y'] = W_y
-        ulx,svlx,_ = slin.svd(self.params['L_x'])
-        L_x = ulx[:,:self.zxDim] @ np.diag(svlx[:self.zxDim])
-        uly,svly,_ = slin.svd(self.params['L_y'])
-        L_y = uly[:,:self.zyDim] @ np.diag(svly[:self.zyDim])
-        self.params['L_x'] = L_x
-        self.params['L_y'] = L_y
+            u,s,_ = slin.svd(self.params['W_1'],full_matrices=False)
+            W_1 = u @ np.diag(s)
+            u,s,_ = slin.svd(self.params['W_2'],full_matrices=False)
+            W_2 = u @ np.diag(s)
+            self.params['W_1'] = W_1
+            self.params['W_2'] = W_2
+        u,s,_ = slin.svd(self.params['L_1'],full_matrices=False)
+        L_1 = u @ np.diag(s)
+        u,s,_ = slin.svd(self.params['L_2'],full_matrices=False)
+        L_2 = u @ np.diag(s)
+        self.params['L_1'] = L_1
+        self.params['L_2'] = L_2
 
-        L_top = np.concatenate((W_x,L_x,np.zeros((self.xDim,self.zyDim))),axis=1)
-        L_bottom = np.concatenate((W_y,np.zeros((self.yDim,self.zxDim)),L_y),axis=1)
+        L_top = np.concatenate((W_1,L_1,np.zeros((self.n1,self.d2))),axis=1)
+        L_bottom = np.concatenate((W_2,np.zeros((self.n2,self.d1)),L_2),axis=1)
         L_total = np.concatenate((L_top,L_bottom),axis=0)
         self.params['L_total'] = L_total
 
-    def apply_rotation(self,theta,hem='x'):
+    def apply_rotation(self,theta,hem='1'):
         '''
         Apply rotation by theta degrees to the first column of the within-area loading matrix of the specified area.
 
                 Parameters:
                         theta (float): Angle in degrees by which to rotate
-                        hem (str): Must be one of 'x' or 'y', indicates the area in which to perform rotation
+                        hem (str): Must be one of '1' or '2', indicates the area in which to perform rotation
 
         '''        
         # first, orthogonalize the loading matrices
@@ -293,30 +297,30 @@ class sim_pcca_fa:
         params = self.params.copy()
 
         # rotate eigenvector of loading matrix
-        if hem == 'x':
+        if hem == '1':
             # perform rotation in area X
-            svlx = slin.svdvals(params['L_x'])
-            col1 = self.rotate_by_theta(params['W_x'][:,0], theta, self.xDim) # generate vector theta degrees from the first col of W
-            # generate remaining columns of L_x
-            rest_cols = np.random.randn(self.xDim, self.zxDim-1)
+            s = slin.svdvals(params['L_1'])
+            col1 = self.rotate_by_theta(params['W_1'][:,0], theta, self.n1) # generate vector theta degrees from the first col of W_1
+            # generate remaining columns of L_1
+            rest_cols = np.random.randn(self.n1, self.d1-1)
             tmp = np.column_stack((col1, rest_cols))
-            ulx,_ = slin.qr(tmp)
-            L_x = ulx[:,:self.zxDim] @ np.diag(svlx[:self.zxDim])
-            self.params['L_x'] = L_x
-        elif hem == 'y':
+            u,_ = slin.qr(tmp)
+            L_1 = u[:,:self.d1] @ np.diag(s[:self.d1])
+            self.params['L_1'] = L_1
+        elif hem == '2':
             # perform rotation in area Y
-            svly = slin.svdvals(params['L_y'])
-            col1 = self.rotate_by_theta(params['W_y'][:,0], theta, self.yDim) # generate vector theta degrees from the first col of W
-            # generate remaining columns of L_x
-            rest_cols = np.random.randn(self.yDim, self.zyDim-1)
+            s = slin.svdvals(params['L_2'])
+            col1 = self.rotate_by_theta(params['W_2'][:,0], theta, self.n2) # generate vector theta degrees from the first col of W_2
+            # generate remaining columns of L_1
+            rest_cols = np.random.randn(self.n2, self.d2-1)
             tmp = np.column_stack((col1, rest_cols))
-            uly,_ = slin.qr(tmp)
-            L_y = uly[:,:self.zyDim] @ np.diag(svly[:self.zyDim])
-            self.params['L_y'] = L_y
+            u,_ = slin.qr(tmp)
+            L_2 = u[:,:self.d2] @ np.diag(s[:self.d2])
+            self.params['L_2'] = L_2
         else:
-            return ValueError("hem must be 'x' or 'y'")
+            return ValueError("hem must be '1' or '2'")
         
-        L_top = np.concatenate((params['W_x'],self.params['L_x'],np.zeros((self.xDim,self.zyDim))),axis=1)
-        L_bottom = np.concatenate((params['W_y'],np.zeros((self.yDim,self.zxDim)),self.params['L_y']),axis=1)
+        L_top = np.concatenate((params['W_1'],self.params['L_1'],np.zeros((self.n1,self.d2))),axis=1)
+        L_bottom = np.concatenate((params['W_2'],np.zeros((self.n2,self.d1)),self.params['L_2']),axis=1)
         L_total = np.concatenate((L_top,L_bottom),axis=0)
         self.params['L_total'] = L_total
