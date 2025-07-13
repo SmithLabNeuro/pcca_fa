@@ -9,11 +9,11 @@ pCCA-FA terminology, use cases, and fitting procedures are described in detail i
 
 ## Installation
 
-### Quick install
+### Quick install (< 1 min)
 
 Download and extract the file `pcca_fa.zip` to the desired working directory.
 
-### GitHub install
+### GitHub install (< 5 mins)
 
 Download the latest release of pCCA-FA to the desired working directory. This repository uses submodules, please use the following line to download.
 ```
@@ -27,7 +27,7 @@ Alternatively, files for the dependencies can be manually downloaded from GitHub
 
 ## Setup
 
-A file containing tested Python package versions is provided for convenience (`environment.yml`). pCCA-FA code should be run inside this environment, although the tutorial should work in general Python 3.8 environments. To create the environment using conda, run the following command:
+A file containing tested Python package versions is provided for convenience (`environment.yml`). pCCA-FA code should be run inside this environment, although the tutorial should work in general Python 3.8 environments. The code is compatible with Windows, Mac, and Linux operating systems. To create the environment using conda, run the following command:
 
 ```
 conda env create -f environment.yml
