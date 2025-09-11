@@ -63,7 +63,7 @@ class pcca_fa:
         self.params = []
         self.min_var = min_var
 
-    def train(self,X_1,X_2,d,d1,d2,tol=1e-6,max_iter=int(1e6),verbose=False,rand_seed=None,warmstart=True,X_1_early_stop=None,X_2_early_stop=None,start_params=None):
+    def train(self,X_1,X_2,d,d1,d2,tol=1e-6,max_iter=int(1e6),verbose=False,rand_seed=None,warmstart=True,X_1_early_stop=None,X_2_early_stop=None,start_params=None,parallelize=True):
         '''
         Fit a pCCA-FA model to data using expectation-maximization (EM) algorithm.
 
@@ -81,11 +81,39 @@ class pcca_fa:
                         X_1_early_stop (array): Array of size N (trials) x n1 (neurons), test spike counts in area 1
                         X_2_early_stop (array): Array of size N (trials) x n2 (neurons), test spike counts in area 2
                         start_params (dict): Dictionary containing pCCA-FA model parameters to initialize EM algorithm
+                        use_process (bool): Whether to run training in a separate process for better performance
 
                 Returns:
                         LL (array): Training data log likelihood at each iteration of EM algorithm
                         testLL (array): If using early_stop test data, contains test data log likelihood at each iteration of EM algorithm. Empty array otherwise.
         '''
+
+        if parallelize:
+            # Define function to run in parallel
+            def _train_wrapper(X_1, X_2, d, d1, d2, min_var, tol, max_iter, verbose, rand_seed, 
+                             warmstart, X_1_early_stop, X_2_early_stop, start_params):
+                model = pcca_fa(min_var=min_var)
+                LL, testLL = model.train(X_1, X_2, d, d1, d2, 
+                                       tol=tol, max_iter=max_iter,
+                                       verbose=verbose, rand_seed=rand_seed, 
+                                       warmstart=warmstart,
+                                       X_1_early_stop=X_1_early_stop, 
+                                       X_2_early_stop=X_2_early_stop,
+                                       start_params=start_params, 
+                                       parallelize=False)
+                return LL, testLL, model.get_params()
+            
+            # Run in parallel with all arguments explicitly passed
+            result = Parallel(n_jobs=cpu_count(logical=False), backend='loky')([
+                delayed(_train_wrapper)(X_1, X_2, d, d1, d2, self.min_var, tol, max_iter, 
+                                     verbose, rand_seed, warmstart, X_1_early_stop, 
+                                     X_2_early_stop, start_params)]
+            )[0]
+            
+            LL, testLL, self.params = result
+            return LL, testLL
+
+        # Regular in-process training
         # set random seed
         if not(rand_seed is None):
             np.random.seed(rand_seed)
@@ -516,8 +544,6 @@ class pcca_fa:
         if not(rand_seed is None):
             np.random.seed(rand_seed)
 
-        N = X_1.shape[0]
-
         # make sure z dims are integers
         d_list,d1_list,d2_list = np.meshgrid(d_list.astype(int),d1_list.astype(int),d2_list.astype(int))
         d_list = np.matrix.flatten(d_list)
@@ -566,41 +592,10 @@ class pcca_fa:
         results['d1']=d1
         results['d2']=d2
         results['final_LL'] = sum_LLs[max_idx]
-        self.train(X_1,X_2,d,d1,d2)
+        self.train(X_1,X_2,d,d1,d2) # sets params of the final model
 
-        # cross-validate to get cross-validated canonical correlations
-        if verbose:
-            print('Crossvalidating pCCA-FA model to compute canon corrs...')
-        zx1,zx2 = np.zeros((2,N,d))
-        for train_idx,test_idx in cv_kfold.split(X_1):
-            X_1_train,X_1_test = X_1[train_idx], X_1[test_idx]
-            X_2_train,X_2_test = X_2[train_idx], X_2[test_idx]
+        self.compute_cv_canonical_corrs(verbose=verbose)
 
-            tmp = pcca_fa()
-            tmp.train(X_1_train,X_2_train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart)
-            W_1,W_2,L_1,L_2 = tmp.get_loading_matrices() # take direct EM outputs to compute E-step
-            tmp_params = tmp.get_params()
-            
-            # compute pCCA E-step: E[z|x] and E[z|y]
-            X_1c = X_1_test - tmp_params['mu_x1']
-            Cx1 = W_1 @ W_1.T + (L_1 @ L_1.T + np.diag(tmp_params['psi_1']))
-            invCx1 = slin.inv(Cx1)
-            zx1_mu = X_1c.dot(invCx1).dot(W_1)
-
-            X_2c = X_2_test - tmp_params['mu_x2']
-            Cx2 = W_2 @ W_2.T + (L_2 @ L_2.T + np.diag(tmp_params['psi_2']))
-            invCx2 = slin.inv(Cx2)
-            zx2_mu = X_2c.dot(invCx2).dot(W_2)
-
-            zx1[test_idx,:] = zx1_mu
-            zx2[test_idx,:] = zx2_mu
-
-        cv_rho = np.zeros(d)
-        for i in range(d):
-            tmp = np.corrcoef(zx1[:,i],zx2[:,i])
-            cv_rho[i] = tmp[0,1]
-        
-        self.params['cv_rho'] = cv_rho
         self.cv_results = results
 
         return results
@@ -632,9 +627,9 @@ class pcca_fa:
         
         tmp = pcca_fa()
         if early_stop:
-            tmp.train(X_1train,X_2train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart,X_1_early_stop=X_1test,X_2_early_stop=X_2test)
+            tmp.train(X_1train,X_2train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart,X_1_early_stop=X_1test,X_2_early_stop=X_2test,parallelize=False)
         else:
-            tmp.train(X_1train,X_2train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart)
+            tmp.train(X_1train,X_2train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart,parallelize=False)
         # log-likelihood
         _,LL = tmp.estep(X_1test,X_2test)
         # prediction error
@@ -688,6 +683,80 @@ class pcca_fa:
         pred_y = pred_total[:,n1:] # predictions for neurons in area 2
 
         return pred_x,pred_y
+
+    def compute_cv_canonical_corrs(self,X_1,X_2,n_folds=10,verbose=False,max_iter=int(1e5),tol=1e-6,warmstart=True,rand_seed=None):
+        '''
+        Get cross-validated canonical correlations from the fit model.
+
+                Parameters:
+                Parameters:
+                        X_1 (array): Array of size N (trials) x n1 (neurons), spike counts in area 1
+                        X_2 (array): Array of size N (trials) x n2 (neurons), spike counts in area 2
+                        n_folds (int): The number of folds (k) for cross-validation
+                        verbose (bool): Flag to print out updates during training
+                        max_iter (int): Maximum number of iterations of the EM algorithm
+                        tol (float): Tolerance for convergence of the EM algorithm
+                        warmstart (bool): Whether to initialize starting parameters of EM algorithm using pCCA and FA
+                        rand_seed (int): Seed for random number generator, provide to ensure reproducibility
+
+                Returns:
+                        cv_rho (array): Array of size d (latents) x 1 containing the cross-validated canonical correlations
+        '''
+
+        # set random seed
+        if not(rand_seed is None):
+            np.random.seed(rand_seed)
+
+        # check if model has been fit
+        if not self.params:
+            raise ValueError('Model must be fit before computing cross-validated canonical correlations. Run train() or crossvalidate() first.')
+
+        # cross-validate to get cross-validated canonical correlations
+        if verbose:
+            print('Crossvalidating pCCA-FA model to compute canon corrs...')
+
+        # set up needed parameters
+        d,d1,d2 = self.params['d'],self.params['d1'],self.params['d2']
+        N = X_1.shape[0]
+
+        cv_kfold = ms.KFold(n_splits=n_folds,shuffle=True,random_state=rand_seed)    
+        zx1,zx2 = np.zeros((2,N,d))
+        i=0
+        for train_idx,test_idx in cv_kfold.split(X_1):
+            if verbose:
+                print('   Fold ',i+1,' of ',n_folds,'...')
+
+            X_1_train,X_1_test = X_1[train_idx], X_1[test_idx]
+            X_2_train,X_2_test = X_2[train_idx], X_2[test_idx]
+
+            tmp = pcca_fa()
+            tmp.train(X_1_train,X_2_train,d,d1,d2,rand_seed=rand_seed,max_iter=max_iter,tol=tol,warmstart=warmstart)
+            W_1,W_2,L_1,L_2 = tmp.get_loading_matrices() # take direct EM outputs to compute E-step
+            tmp_params = tmp.get_params()
+            
+            # compute pCCA E-step: E[z|x] and E[z|y]
+            X_1c = X_1_test - tmp_params['mu_x1']
+            Cx1 = W_1 @ W_1.T + (L_1 @ L_1.T + np.diag(tmp_params['psi_1']))
+            invCx1 = slin.inv(Cx1)
+            zx1_mu = X_1c.dot(invCx1).dot(W_1)
+
+            X_2c = X_2_test - tmp_params['mu_x2']
+            Cx2 = W_2 @ W_2.T + (L_2 @ L_2.T + np.diag(tmp_params['psi_2']))
+            invCx2 = slin.inv(Cx2)
+            zx2_mu = X_2c.dot(invCx2).dot(W_2)
+
+            zx1[test_idx,:] = zx1_mu
+            zx2[test_idx,:] = zx2_mu
+
+            i+=1
+
+        cv_rho = np.zeros(d)
+        for i in range(d):
+            tmp = np.corrcoef(zx1[:,i],zx2[:,i])
+            cv_rho[i] = tmp[0,1]
+        
+        self.params['cv_rho'] = cv_rho
+        return cv_rho
 
     def compute_load_sim(self):
         '''
