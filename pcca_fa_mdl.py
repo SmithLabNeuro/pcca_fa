@@ -594,7 +594,7 @@ class pcca_fa:
         results['final_LL'] = sum_LLs[max_idx]
         self.train(X_1,X_2,d,d1,d2) # sets params of the final model
 
-        self.compute_cv_canonical_corrs(verbose=verbose)
+        self.compute_cv_canonical_corrs(X_1,X_2,n_folds=n_folds,verbose=verbose,max_iter=max_iter,tol=tol,warmstart=warmstart,rand_seed=rand_seed)
 
         self.cv_results = results
 
